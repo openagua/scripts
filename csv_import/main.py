@@ -9,6 +9,7 @@ from connection import connection
 import sys
 import numpy as np
 import pandas as pd
+import itertools
 
 def commandline_parser():
 
@@ -67,33 +68,43 @@ def main():
 
     df = pd.read_csv(args.csv_file, index_col=0, parse_dates=True,dtype=np.float64)
 
-    resource_scenarios = []
-    for col in df.columns:
-        variable, resource_name = col.split('.')
-        if variable not in ['Inflow', 'Outflow']:
-            continue
-        data = pd.DataFrame(df[:][col])
-        dataset = data.to_json(date_format='iso')
+    temperature = [0,1,2,3,4] # deltas in deg C
+    precipitation = [-0.2, -0.1, 0, 0.1, 0.2] # deltas in fraction increase
+    for (delta_T, delta_P) in itertools.product(temperature, precipitation):
+        resource_scenarios = []
+        for col in df.columns:
+            variable, resource_name = col.split('.')
+            if variable not in ['Inflow', 'Outflow']:
+                continue
 
-        attr = attr_lookup[variable]
-        res_attr = res_attr_lookup[resource_name][attr['attr_id']]
+            data = pd.DataFrame(df[:][col])
+            if variable == 'Inflow':
+                data *= (1 + delta_P)
+                data *= (1 - delta_T / 25)
+            if variable == 'Outflow':
+                data *= (1 + delta_P)
+                data *= (1 - delta_T / 15)
+            dataset = data.to_json(date_format='iso')
 
-        rs = {
-            'resource_attr_id': res_attr['id'],
-            'dataset_id': None,
-            'value': {
-                'type': 'timeseries',
-                'name': '{} - {} - {} [{}]'.format(network['name'], resource_name, attr['attr_name'], scenario['name']),
-                'unit': attr['unit'],
-                'dimension': attr['dimension'],
-                'value': dataset
+            attr = attr_lookup[variable]
+            res_attr = res_attr_lookup[resource_name][attr['attr_id']]
+
+            rs = {
+                'resource_attr_id': res_attr['id'],
+                'dataset_id': None,
+                'value': {
+                    'type': 'timeseries',
+                    'name': '{} - {} - {} [{}]'.format(network['name'], resource_name, attr['attr_name'], scenario['name']),
+                    'unit': attr['unit'],
+                    'dimension': attr['dimension'],
+                    'value': dataset
+                }
             }
-        }
 
-        resource_scenarios.append(rs)
+            resource_scenarios.append(rs)
 
-    scenario['resourcescenarios'] = resource_scenarios
-    result = conn.call2('update_scenario', scen=scenario)
+        scenario['resourcescenarios'] = resource_scenarios
+        result = conn.call2('update_scenario', scen=scenario)
 
 if __name__ == '__main__':
     try:
